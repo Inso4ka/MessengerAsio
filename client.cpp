@@ -89,6 +89,10 @@ int main(int argc, char* argv[])
                         std::cerr << "Invalid send command format." << std::endl;
                     }
                 }
+                else if (command.substr(0, 5) == "online") {
+                    boost::asio::streambuf receive_buffer;
+                    boost::asio::read(socket, receive_buffer, boost::asio::transfer_all());
+                }
                 else
                 {
                     // отправляем команду серверу через сокет

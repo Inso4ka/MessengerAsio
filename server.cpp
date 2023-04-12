@@ -85,6 +85,11 @@ void handleConnection(std::shared_ptr<tcp::socket> socketPtr)
                     boost::asio::write(*socketPtr, boost::asio::buffer(errorMessage));
                 }
             }
+            if (command == "online") {
+                for (const auto& [value, key] : clientSockets) {
+                    boost::asio::write(*socketPtr, boost::asio::buffer("\nIP: " + value));
+                }
+            }
             // если клиент отправляет общее сообщение
             else
             {

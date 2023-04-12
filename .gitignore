@@ -1,3 +1,7 @@
 main
 .vscode
 main.dSYM/Contents/Info.plist
+server
+client
+client.dSYM/Contents/Info.plist
+server.dSYM/Contents/Info.plist
