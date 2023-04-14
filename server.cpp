@@ -8,31 +8,28 @@
 
 using boost::asio::ip::tcp;
 
-std::map<std::string, tcp::socket*> clientSockets; // map для хранения идентификаторов клиентов и соответствующих им сокетов
-std::vector<std::thread> threads; // вектор для хранения потоков
+std::map<std::string, tcp::socket*> clientSockets; // map for socket storage
+std::vector<std::thread>            threads;       // vector for thread storage
 
 void sendMessage(const std::string& message, const std::string& recipientId)
 {
     std::cout << "Sending message \"" << message << "\" to " << recipientId << std::endl;
+    auto it = clientSockets.find(recipientId); // iterator to a specific identifier
 
-    auto it = clientSockets.find(recipientId); // получаем итератор на элемент с указанным идентификатором
-
-    if (it != clientSockets.end() && it->second->is_open()) // если сокет получателя найден и открыт
+    if (it != clientSockets.end() && it->second->is_open()) // if the socket exists and is open
     {
-        // отправляем сообщение через сокет
+        //  send message through socket
         boost::asio::write(*it->second, boost::asio::buffer(message));
-    }
-    else // иначе выдаем ошибку
+    } else // else throwing an exception
     {
         std::cerr << "Recipient " << recipientId << " not found!" << std::endl;
-        clientSockets.erase(it); // удаляем запись из map
+        clientSockets.erase(it); // delete map element
     }
 }
 
-
 void handleConnection(std::shared_ptr<tcp::socket> socketPtr)
 {
-    std::string clientId = socketPtr->remote_endpoint().address().to_string(); // получаем идентификатор клиента на основе его IP-адреса и порта
+    std::string clientId = socketPtr->remote_endpoint().address().to_string(); // getting ID client based on IP
 
     if (!socketPtr->is_open()) {
         std::cerr << "Socket for client " << clientId << " is not open." << std::endl;
@@ -41,110 +38,95 @@ void handleConnection(std::shared_ptr<tcp::socket> socketPtr)
 
     std::cout << "New connection from " << clientId << std::endl;
 
-    clientSockets[clientId] = socketPtr.get(); // добавляем сокет клиента в map
+    clientSockets[clientId] = socketPtr.get(); // adding client's socket to map
 
-    while (true)
-    {
-        try
-        {
-            // читаем сообщение от клиента
-            char buf[1024];
+    while (true) {
+        try {
+            // readind client's message
+            char                      buf[1024];
             boost::system::error_code error;
-            size_t len = socketPtr->read_some(boost::asio::buffer(buf), error);
+            size_t                    len = socketPtr->read_some(boost::asio::buffer(buf), error);
 
             if (error == boost::asio::error::eof || error == boost::asio::error::connection_reset) {
                 std::cout << "Client " << clientId << " disconnected." << std::endl;
-                break; // выходим из цикла чтения сообщений от клиента
-            }
-            else if (error) {
+                break; // abort if the user disconnected
+            } else if (error) {
                 std::cerr << "Error reading from client " << clientId << ": " << error.message() << std::endl;
-                break; // выходим из цикла чтения сообщений от клиента
+                break; // abort if we got an error
             }
 
-            // разбираем сообщение, чтобы понять, что нужно сделать с сообщением (отправить его получателю или нет)
             std::istringstream iss(std::string(buf, len));
-            std::string command;
+            std::string        command;
             iss >> command;
 
-            // если клиент отправляет сообщение конкретному получателю
-            if (command == "send")
+            if (command == "send") // if command send - send message to specific member
             {
                 std::string recipientId;
                 iss.ignore();
-                std::getline(iss, recipientId, ' '); // считываем идентификатор получателя
+                std::getline(iss, recipientId, ' '); // reading recipient's ID
 
                 tcp::socket* recipientSocket = clientSockets[recipientId];
-                if (recipientSocket) // если получатель найден, отправляем ему сообщение
+                if (recipientSocket) // if recipient exists in map, send message
                 {
-                    std::string message = clientId + ": " + iss.str().substr(5 + recipientId.length()); // формируем новое сообщение с идентификатором отправителя
+                    std::string message = clientId + ": " + iss.str().substr(5 + recipientId.length()); // create new message
                     sendMessage(message, recipientId);
-                } 
-                else // если получатель не найден, отправляем сообщение об ошибке
+                } else // if recipient wasn't found, throw an error
                 {
                     std::string errorMessage = "Error: client '" + recipientId + "' not found.";
                     boost::asio::write(*socketPtr, boost::asio::buffer(errorMessage));
                 }
             }
-            if (command == "online") {
+            if (command == "online") { // if command online - show map content to client
                 for (const auto& [value, key] : clientSockets) {
                     boost::asio::write(*socketPtr, boost::asio::buffer("\nIP: " + value));
                 }
-            }
-            // если клиент отправляет общее сообщение
-            else
-            {
+            } else { // if the command is not in the registry
                 std::cerr << "Unknown command: " << command << std::endl;
             }
 
-        }
-        catch (std::exception& e)
-        {
+        } catch (std::exception& e) {
             std::cerr << "Exception caught in handleConnection(): " << e.what() << std::endl;
         }
     }
 
-    // удаляем сокет клиента из map
+    // deleting socket from map
     clientSockets.erase(clientId);
 }
 
-
 int main(int argc, char* argv[])
 {
-    try
-    {
-        if (argc != 2)
-        {
+    try {
+        // argv for port
+        if (argc != 2) {
             std::cerr << "Usage: " << argv[0] << " <port>" << std::endl;
             return 1;
         }
 
+        // main part IO
         boost::asio::io_service io_service;
-        tcp::acceptor acceptor(io_service, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
+        tcp::acceptor           acceptor(io_service, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
 
         std::cout << "Server started listening on " << std::atoi(argv[1]) << std::endl;
 
-        for (;;)
-        {
-            // создаем сокет для нового подключения
+        for (;;) {
+            // socket for new connection (used shared_ptr cause if we're using std::thread, socket is temporary object, it will be destroyed
+            // prematurely)
             std::shared_ptr<tcp::socket> socketPtr = std::make_shared<tcp::socket>(io_service);
 
-            // ждем новых подключений
+            // waiting for new connections
             acceptor.accept(*socketPtr);
 
-            // запускаем функцию handleConnection() в новом потоке для обработки подключения
+            // run the handleConnection() function in a new thread to process the connection
             std::thread th(handleConnection, socketPtr);
             th.detach();
 
-
-            threads.emplace_back(std::move(th)); // добавляем поток в вектор потоков
+            threads.emplace_back(std::move(th)); // add new thread to vector
         }
-    }
-    catch (std::exception& e)
-    {
+    } catch (std::exception& e) {
         std::cerr << "Exception caught: " << e.what() << std::endl;
     }
 
-    for (auto& t : threads) // ожидаем завершения всех потоков
+    for (auto& t : threads) // waiting for all threads to finish
     {
         t.join();
     }
