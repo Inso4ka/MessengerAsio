@@ -8,10 +8,34 @@
 
 using boost::asio::ip::tcp;
 
-std::map<std::string, tcp::socket*> clientSockets; // map for socket storage
-std::vector<std::thread>            threads;       // vector for thread storage
+class Server
+{
+  public:
+    Server(boost::asio::io_service& io_service, int port);
+    void run();
 
-void sendMessage(const std::string& message, const std::string& recipientId)
+  private:
+    tcp::acceptor                       m_acceptor;
+    std::map<std::string, tcp::socket*> clientSockets; // map for socket storage
+    void                                sendMessage(const std::string& message, const std::string& recipientId);
+    void                                handleConnection(std::shared_ptr<tcp::socket> socketPtr);
+};
+
+Server::Server(boost::asio::io_service& io_service, int port) : m_acceptor(io_service, tcp::endpoint(tcp::v4(), port))
+{
+    std::cout << "Server started listening on " << port << std::endl;
+}
+
+void Server::run()
+{
+    while (true) {
+        std::shared_ptr<tcp::socket> socketPtr = std::make_shared<tcp::socket>(m_acceptor.get_executor());
+        m_acceptor.accept(*socketPtr);
+        handleConnection(socketPtr);
+    }
+}
+
+void Server::sendMessage(const std::string& message, const std::string& recipientId)
 {
     std::cout << "Sending message \"" << message << "\" to " << recipientId << std::endl;
     auto it = clientSockets.find(recipientId); // iterator to a specific identifier
@@ -27,7 +51,7 @@ void sendMessage(const std::string& message, const std::string& recipientId)
     }
 }
 
-void handleConnection(std::shared_ptr<tcp::socket> socketPtr)
+void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
 {
     std::string clientId = socketPtr->remote_endpoint().address().to_string(); // getting ID client based on IP
 
@@ -75,8 +99,7 @@ void handleConnection(std::shared_ptr<tcp::socket> socketPtr)
                     std::string errorMessage = "Error: client '" + recipientId + "' not found.";
                     boost::asio::write(*socketPtr, boost::asio::buffer(errorMessage));
                 }
-            }
-            if (command == "online") { // if command online - show map content to client
+            } else if (command == "online") { // if command online - show map content to client
                 for (const auto& [value, key] : clientSockets) {
                     boost::asio::write(*socketPtr, boost::asio::buffer("\nIP: " + value));
                 }
@@ -101,35 +124,15 @@ int main(int argc, char* argv[])
             std::cerr << "Usage: " << argv[0] << " <port>" << std::endl;
             return 1;
         }
-
-        // main part IO
         boost::asio::io_service io_service;
-        tcp::acceptor           acceptor(io_service, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
+        Server                  server{io_service, std::atoi(argv[1])};
+        // create a new thread and run server in it
+        std::thread serverThread([&server]() { server.run(); });
 
-        std::cout << "Server started listening on " << std::atoi(argv[1]) << std::endl;
+        serverThread.join();
 
-        for (;;) {
-            // socket for new connection (used shared_ptr cause if we're using std::thread, socket is temporary object, it will be destroyed
-            // prematurely)
-            std::shared_ptr<tcp::socket> socketPtr = std::make_shared<tcp::socket>(io_service);
-
-            // waiting for new connections
-            acceptor.accept(*socketPtr);
-
-            // run the handleConnection() function in a new thread to process the connection
-            std::thread th(handleConnection, socketPtr);
-            th.detach();
-
-            threads.emplace_back(std::move(th)); // add new thread to vector
-        }
     } catch (std::exception& e) {
         std::cerr << "Exception caught: " << e.what() << std::endl;
     }
-
-    for (auto& t : threads) // waiting for all threads to finish
-    {
-        t.join();
-    }
-
     return 0;
 }
