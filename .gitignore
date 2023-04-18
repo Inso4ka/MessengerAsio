@@ -5,3 +5,8 @@ server
 client
 client.dSYM/Contents/Info.plist
 server.dSYM/Contents/Info.plist
+CMakeFiles
+.DS_Store
+cmake_install.cmake
+CMakeCache.txt
+Makefile
