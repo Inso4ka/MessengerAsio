@@ -15,7 +15,7 @@ class Server
     void run();                                            // this method runs the server and handles the connection
 
   private:
-    std::vector<std::string>            m_data;
+    std::map<std::string, std::string>  m_data;
     tcp::acceptor                       m_acceptor;                                                              // creates sockets for data exchange
     std::map<std::string, tcp::socket*> clientSockets;                                                           // map for socket storage
     void                                sendMessage(const std::string& message, const std::string& recipientId); // send message
@@ -77,23 +77,21 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
         } else if (error) {
             std::cerr << "Error reading from client " << clientId << ": " << error.message() << std::endl;
             return; // abort if we got an error
-        } 
+        }
 
         // processing registration
         std::istringstream iss(std::string(buf, len));
-        std::string        data;
-        iss >> data;
-        size_t      pos   = data.find(' ');
-        std::string login = data.substr(0, pos);
-        auto        it    = std::find(m_data.begin(), m_data.end(), login);
+        std::string        login, password;
+        iss >> login >> password;
+        auto it = std::find_if(m_data.begin(), m_data.end(), [login](const auto& pair) { return pair.first == login; });
         if (it != m_data.end()) {
             boost::asio::write(*socketPtr, boost::asio::buffer("The login is already in use. Try again."));
             std::cout << "User " << login << " registration failed." << std::endl;
             return;
         } else {
             boost::asio::write(*socketPtr, boost::asio::buffer("Registration successful!")); // notify the client that registration was successful
-            m_data.push_back(login); // add the new login to our list of registered users
-            std::cout << "USER: " << login << " ADDED SUCCESSFULLY." << std::endl;
+            m_data.insert(std::make_pair(login, password));                                  // add the new login to our list of registered users
+            std::cout << "USER: " << login << "::" << password << " ADDED SUCCESSFULLY." << std::endl;
         }
 
         // processing messages

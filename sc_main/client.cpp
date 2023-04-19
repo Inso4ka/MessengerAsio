@@ -1,6 +1,7 @@
 #include <iostream>
 #include <boost/asio.hpp>
 #include <thread>
+#include <string>
 
 using boost::asio::ip::tcp;
 
@@ -34,12 +35,17 @@ class Registration
                 }
             }
             if (hasNonAlphaNumCharLog) {
-                std::cout << "Error: login must contain only English letters and digits."
+                std::cout << "Error: the login must contain only English letters and digits."
                           << "\n";
                 break;
             }
             if (m_password.length() < 8) {
                 std::cout << "Error: the password must be at least 8 characters long."
+                          << "\n";
+                break;
+            }
+            if (m_password.find(' ') != std::string::npos) {
+                std::cout << "Error: the password must not contain spaces."
                           << "\n";
                 break;
             }
@@ -96,7 +102,7 @@ void Client::initializeUser()
 
     while (!isCorrect) {
         std::cout << "Enter login: ";
-        std::getline(std::cin, login);
+        std::getline(std::cin >> std::ws, login);
         if (login.empty()) {
             std::cout << "Error: login must not be empty."
                       << "\n";
@@ -104,7 +110,7 @@ void Client::initializeUser()
         }
 
         std::cout << "Enter password: ";
-        std::getline(std::cin, password);
+        std::getline(std::cin >> std::ws, password);
         if (password.empty()) {
             std::cout << "Error: password must not be empty."
                       << "\n";
