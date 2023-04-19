@@ -4,6 +4,50 @@
 
 using boost::asio::ip::tcp;
 
+#include <iostream>
+
+class Registration
+{
+  public:
+    Registration(const std::string& login, const std::string& password) : m_login{login}, m_password{password}
+    {
+        checkData();
+    }
+    bool getPermission() const
+    {
+        return isCorrect;
+    }
+
+  private:
+    std::string m_login;
+    std::string m_password;
+    bool        isCorrect = false;
+
+    void checkData()
+    {
+        while (!isCorrect) {
+            bool hasNonAlphaNumCharLog = false;
+            for (char ch : m_login) {
+                if (!isalpha(ch) && !isdigit(ch)) {
+                    hasNonAlphaNumCharLog = true;
+                    break;
+                }
+            }
+            if (hasNonAlphaNumCharLog) {
+                std::cout << "Error: login must contain only English letters and digits."
+                          << "\n";
+                break;
+            }
+            if (m_password.length() < 8) {
+                std::cout << "Error: the password must be at least 8 characters long."
+                          << "\n";
+                break;
+            }
+            isCorrect = true;
+        }
+    }
+};
+
 class Client
 {
   public:
@@ -19,6 +63,7 @@ class Client
     void readMessage();                              // method reads a message from the socket
     void processInput();                             // method processes the input from the user
     void processMessage(const std::string& command); // method processes the message received from the server
+    void initializeUser();
 };
 
 Client::Client(const std::string& host, const std::string& port)
@@ -33,12 +78,51 @@ void Client::run()
 {
     try {
         boost::asio::connect(m_socket, m_endpoint);
+        initializeUser();
         std::thread t([&]() { readMessage(); });
         processInput();
         t.join();
         m_socket.close();
     } catch (std::exception& e) {
         std::cerr << "Exception caught: " << e.what() << std::endl;
+    }
+}
+
+void Client::initializeUser()
+{
+    std::string login;
+    std::string password;
+    bool        isCorrect = false;
+
+    while (!isCorrect) {
+        std::cout << "Enter login: ";
+        std::getline(std::cin, login);
+        if (login.empty()) {
+            std::cout << "Error: login must not be empty."
+                      << "\n";
+            continue;
+        }
+
+        std::cout << "Enter password: ";
+        std::getline(std::cin, password);
+        if (password.empty()) {
+            std::cout << "Error: password must not be empty."
+                      << "\n";
+            continue;
+        }
+
+        Registration user(login, password);
+        std::string  buffer{};
+        if (user.getPermission()) {
+            boost::asio::write(m_socket, boost::asio::buffer(login + " " + password));
+            boost::asio::read(m_socket, boost::asio::buffer(buffer));
+            if (buffer == "false") {
+                std::cout << "Error: login is already in use." << std::endl;
+            } else {
+                std::cout << "Login and password are correct." << std::endl;
+                isCorrect = true;
+            }
+        }
     }
 }
 

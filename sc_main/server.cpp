@@ -15,6 +15,7 @@ class Server
     void run();                                            // this method runs the server and handles the connection
 
   private:
+    std::vector<std::string>            m_data;
     tcp::acceptor                       m_acceptor;                                                              // creates sockets for data exchange
     std::map<std::string, tcp::socket*> clientSockets;                                                           // map for socket storage
     void                                sendMessage(const std::string& message, const std::string& recipientId); // send message
@@ -64,21 +65,50 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
 
     clientSockets[clientId] = socketPtr.get(); // adding client's socket to map
 
-    while (true) {
-        try {
-            // readind client's message
-            char                      buf[1024];
-            boost::system::error_code error;
-            size_t                    len = socketPtr->read_some(boost::asio::buffer(buf), error);
+    try {
+        // readind client's message
+        char                      buf[1024];
+        boost::system::error_code error;
+        size_t                    len = socketPtr->read_some(boost::asio::buffer(buf), error);
+
+        if (error == boost::asio::error::eof || error == boost::asio::error::connection_reset) {
+            std::cout << "Client " << clientId << " disconnected." << std::endl;
+            return; // abort if the user disconnected
+        } else if (error) {
+            std::cerr << "Error reading from client " << clientId << ": " << error.message() << std::endl;
+            return; // abort if we got an error
+        } 
+
+        // processing registration
+        std::istringstream iss(std::string(buf, len));
+        std::string        data;
+        iss >> data;
+        size_t      pos   = data.find(' ');
+        std::string login = data.substr(0, pos);
+        auto        it    = std::find(m_data.begin(), m_data.end(), login);
+        if (it != m_data.end()) {
+            boost::asio::write(*socketPtr, boost::asio::buffer("The login is already in use. Try again."));
+            std::cout << "User " << login << " registration failed." << std::endl;
+            return;
+        } else {
+            boost::asio::write(*socketPtr, boost::asio::buffer("Registration successful!")); // notify the client that registration was successful
+            m_data.push_back(login); // add the new login to our list of registered users
+            std::cout << "USER: " << login << " ADDED SUCCESSFULLY." << std::endl;
+        }
+
+        // processing messages
+        while (true) {
+            len = socketPtr->read_some(boost::asio::buffer(buf), error); // read user input
 
             if (error == boost::asio::error::eof || error == boost::asio::error::connection_reset) {
                 std::cout << "Client " << clientId << " disconnected." << std::endl;
-                break; // abort if the user disconnected
+                break; // client disconnected, break out of the loop
             } else if (error) {
                 std::cerr << "Error reading from client " << clientId << ": " << error.message() << std::endl;
-                break; // abort if we got an error
+                break; // error occurred, break out of the loop
             }
 
+            // process user input
             std::istringstream iss(std::string(buf, len));
             std::string        command;
             iss >> command;
@@ -107,20 +137,26 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
                 std::cerr << "Unknown command: " << command << std::endl;
             }
 
-        } catch (std::exception& e) {
-            std::cerr << "Exception caught in handleConnection(): " << e.what() << std::endl;
+            // send message to all other clients
+            /* for (auto& kv : clientSockets) {
+                if (kv.second != socketPtr.get()) { // don't send the message back to the original client
+                    boost::asio::write(*kv.second, boost::asio::buffer(login + ": " + message)); // send the message
+                }
+            }*/
         }
+    } catch (std::exception& e) {
+        std::cerr << "Exception in thread: " << e.what() << std::endl;
     }
 
-    clientSockets.erase(clientId); // deleting socket from map
+    clientSockets.erase(clientId); // remove client's socket from map
 }
 
 int main()
 {
     try {
-        boost::asio::io_service io_service;                             // io_service handles asynchronous I/O requests
+        boost::asio::io_service io_service;               // io_service handles asynchronous I/O requests
         Server                  server{io_service, 8080}; // create server
-        server.run();                                                   // run server
+        server.run();                                     // run server
     } catch (std::exception& e) {
         std::cerr << "Exception caught: " << e.what() << std::endl;
     }
