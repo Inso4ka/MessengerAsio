@@ -5,8 +5,153 @@
 #include <map>
 #include <thread>
 #include <memory>
+#include <sqlite3.h>
 
 using boost::asio::ip::tcp;
+
+class Database
+{
+  public:
+    Database(const std::string& username, const std::string& password, std::shared_ptr<tcp::socket> socketPtr)
+        : m_username(username), m_password(password), m_socket(socketPtr)
+    {
+        int res = sqlite3_open("database.db", &m_db);
+        if (res != SQLITE_OK) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error opening database."));
+            return;
+        }
+        create();
+    }
+
+    void getIntoSystem()
+    {
+        std::string   stmt = "SELECT * FROM users WHERE username='" + m_username + "'";
+        sqlite3_stmt* sql_stmt;
+        int           res = sqlite3_prepare_v2(m_db, stmt.c_str(), -1, &sql_stmt, nullptr);
+        if (res != SQLITE_OK) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error preparing SQL statement."));
+            sqlite3_finalize(sql_stmt);
+            return;
+        }
+        res = sqlite3_step(sql_stmt);
+        if (res == SQLITE_ROW) {
+            std::string stored_password((const char*)sqlite3_column_text(sql_stmt, 1));
+            if (stored_password == m_password) {
+                boost::asio::write(*m_socket, boost::asio::buffer("Welcome back, " + m_username + "!\n"));
+                boost::asio::write(*m_socket, boost::asio::buffer("Login successful."));
+            } else {
+                boost::asio::write(*m_socket, boost::asio::buffer("Invalid password."));
+                // Разрываем соединение при неправильном пароле
+                try {
+                    m_socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
+                    m_socket->close();
+                } catch (std::exception& e) {
+                    std::cerr << "Error closing socket: " << e.what() << std::endl;
+                }
+            }
+        } else {
+            boost::asio::write(*m_socket, boost::asio::buffer("User not found."));
+            try {
+                m_socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
+                m_socket->close();
+            } catch (std::exception& e) {
+                std::cerr << "Error closing socket: " << e.what() << std::endl;
+            }
+        }
+        sqlite3_finalize(sql_stmt);
+    }
+    void addUser(const std::string& username)
+    {
+        std::string stmt = "INSERT INTO users (username, password) VALUES ('" + username + "', '-')";
+        sqlite3_stmt* sql_stmt;
+        int           res = sqlite3_prepare_v2(m_db, stmt.c_str(), -1, &sql_stmt, nullptr);
+        if (res != SQLITE_OK) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error preparing SQL statement."));
+            sqlite3_finalize(sql_stmt);
+            return;
+        }
+
+        res = sqlite3_step(sql_stmt);
+        if (res != SQLITE_DONE) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error adding user to the database."));
+        } else {
+            boost::asio::write(*m_socket, boost::asio::buffer("User " + username + " has been added to the database."));
+        }
+
+        sqlite3_finalize(sql_stmt);
+    }
+
+    void changePassword(const std::string& oldPassword, const std::string& newPassword)
+    {
+        std::string   stmt = "SELECT * FROM users WHERE username='" + m_username + "'";
+        sqlite3_stmt* sql_stmt;
+        int           res = sqlite3_prepare_v2(m_db, stmt.c_str(), -1, &sql_stmt, nullptr);
+        if (res != SQLITE_OK) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error preparing SQL statement."));
+            sqlite3_finalize(sql_stmt);
+            return;
+        }
+        res = sqlite3_step(sql_stmt);
+        if (res != SQLITE_ROW) {
+            boost::asio::write(*m_socket, boost::asio::buffer("User not found."));
+            sqlite3_finalize(sql_stmt);
+            return;
+        }
+        std::string stored_password((const char*)sqlite3_column_text(sql_stmt, 1));
+        if (stored_password != oldPassword) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Old password is incorrect."));
+            sqlite3_finalize(sql_stmt);
+            return;
+        }
+        sqlite3_finalize(sql_stmt);
+        stmt = "UPDATE users SET password=? WHERE username=?";
+        res  = sqlite3_prepare_v2(m_db, stmt.c_str(), -1, &sql_stmt, nullptr);
+        if (res != SQLITE_OK) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error preparing SQL statement."));
+            sqlite3_finalize(sql_stmt);
+            return;
+        }
+        sqlite3_bind_text(sql_stmt, 1, newPassword.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(sql_stmt, 2, m_username.c_str(), -1, SQLITE_TRANSIENT);
+        res = sqlite3_step(sql_stmt);
+        if (res == SQLITE_DONE) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Password changed successfully."));
+        } else {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error changing password."));
+        }
+        sqlite3_finalize(sql_stmt);
+    }
+
+    ~Database()
+    {
+        sqlite3_close(m_db);
+    }
+
+  private:
+    sqlite3*                     m_db;
+    std::string                  m_username;
+    std::string                  m_password;
+    std::shared_ptr<tcp::socket> m_socket;
+
+    void create()
+    {
+        int res = sql_exec(m_db, "CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT)");
+        if (res != SQLITE_OK) {
+            boost::asio::write(*m_socket, boost::asio::buffer("Error creating table.\n"));
+            return;
+        }
+    }
+    static int sql_exec(sqlite3* db, const char* sql_stmt)
+    {
+        char* errmsg = nullptr;
+        int   res    = sqlite3_exec(db, sql_stmt, nullptr, nullptr, &errmsg);
+        if (res != SQLITE_OK) {
+            std::cerr << "Error executing SQL statement: " + std::string(errmsg) + "\n";
+            sqlite3_free(errmsg);
+        }
+        return res;
+    }
+};
 
 class Server
 {
@@ -17,7 +162,7 @@ class Server
   private:
     std::map<std::string, std::string>  m_data;
     tcp::acceptor                       m_acceptor;                                                              // creates sockets for data exchange
-    std::map<std::string, tcp::socket*> m_clients;                                                           // map for socket storage
+    std::map<std::string, tcp::socket*> m_clients;                                                               // map for socket storage
     void                                sendMessage(const std::string& message, const std::string& recipientId); // send message
     void                                handleConnection(std::shared_ptr<tcp::socket> socketPtr);                // function to process the connection
 };
@@ -73,23 +218,20 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
             std::cerr << "Error reading from client " << clientId << ": " << error.message() << std::endl;
             return; // abort if we got an error
         }
-
-        // processing registration
-        std::istringstream iss(std::string(buf, len));
-        iss >> login >> password;
-        auto it = std::find_if(m_data.begin(), m_data.end(), [login](const auto& pair) { return pair.first == login; });
-        if (it != m_data.end()) {
-            boost::asio::write(*socketPtr, boost::asio::buffer("The login is already in use. Try again."));
-            std::cout << "User " << login << " registration failed." << std::endl;
-            return;
-        } else {
-            boost::asio::write(*socketPtr, boost::asio::buffer("Registration successful!")); // notify the client that registration was successful
-            m_data.insert(std::make_pair(login, password));                                  // add the new login to our list of registered users
-            std::cout << "USER: " << login << "::" << password << " ADDED SUCCESSFULLY." << std::endl;
-            m_clients[login] = socketPtr.get(); // adding client's socket to map
+        {
+            // processing registration
+            std::istringstream iss(std::string(buf, len));
+            iss >> login >> password;
         }
 
-                // processing messages
+        Database user(login, password, socketPtr);
+        user.getIntoSystem();
+        if (password == "-") {
+            boost::asio::write(*socketPtr, boost::asio::buffer("\nDon't forget to change the password using the \"setpassword\" command.\n Your current password is \"-\"."));
+        }
+        m_clients[login] = socketPtr.get();
+
+        // processing messages
         while (true) {
             len = socketPtr->read_some(boost::asio::buffer(buf), error); // read user input
 
@@ -126,8 +268,35 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
                 for (const auto& [value, key] : m_clients) {
                     boost::asio::write(*socketPtr, boost::asio::buffer("\nIP: " + clientId));
                 }
-            } else { // if the command is not in the registry
-                std::cerr << "Unknown command: " << command << std::endl;
+            } else if (command == "setpassword") {
+                std::string oldpassword, newpassword;
+                iss.ignore();
+                iss >> oldpassword >> newpassword;
+                if (newpassword.length() < 8) {
+                    boost::asio::write(*socketPtr, boost::asio::buffer("Error: the password must be at least 8 characters long."));
+                } else if (newpassword.find(' ') != std::string::npos) {
+                    boost::asio::write(*socketPtr, boost::asio::buffer("Error: the password must not contain spaces."));
+                } else {
+                    user.changePassword(oldpassword, newpassword);
+                }
+            } else if (command == "add") {
+                std::string newusername;
+                iss.ignore();
+                iss >> newusername;
+                bool hasNonAlphaNumCharLog = false;
+                for (char ch : newusername) {
+                    if (!isalpha(ch) && !isdigit(ch)) {
+                        hasNonAlphaNumCharLog = true;
+                        break;
+                    }
+                }
+                if (hasNonAlphaNumCharLog) {
+                    std::cout << "Error: the login must contain only English letters and digits."
+                              << "\n";
+                    break;
+                } else {
+                    user.addUser(newusername);
+                }
             }
         }
     } catch (std::exception& e) {

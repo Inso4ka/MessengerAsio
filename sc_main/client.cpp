@@ -1,58 +1,8 @@
 #include <iostream>
 #include <boost/asio.hpp>
 #include <thread>
-#include <string>
 
 using boost::asio::ip::tcp;
-
-#include <iostream>
-
-class Registration
-{
-  public:
-    Registration(const std::string& login, const std::string& password) : m_login{login}, m_password{password}
-    {
-        checkData();
-    }
-    bool getPermission() const
-    {
-        return isCorrect;
-    }
-
-  private:
-    std::string m_login;
-    std::string m_password;
-    bool        isCorrect = false;
-
-    void checkData()
-    {
-        while (!isCorrect) {
-            bool hasNonAlphaNumCharLog = false;
-            for (char ch : m_login) {
-                if (!isalpha(ch) && !isdigit(ch)) {
-                    hasNonAlphaNumCharLog = true;
-                    break;
-                }
-            }
-            if (hasNonAlphaNumCharLog) {
-                std::cout << "Error: the login must contain only English letters and digits."
-                          << "\n";
-                break;
-            }
-            if (m_password.length() < 8) {
-                std::cout << "Error: the password must be at least 8 characters long."
-                          << "\n";
-                break;
-            }
-            if (m_password.find(' ') != std::string::npos) {
-                std::cout << "Error: the password must not contain spaces."
-                          << "\n";
-                break;
-            }
-            isCorrect = true;
-        }
-    }
-};
 
 class Client
 {
@@ -84,8 +34,8 @@ void Client::run()
 {
     try {
         boost::asio::connect(m_socket, m_endpoint);
-        initializeUser();
         std::thread t([&]() { readMessage(); });
+        initializeUser();
         processInput();
         t.join();
         m_socket.close();
@@ -96,39 +46,26 @@ void Client::run()
 
 void Client::initializeUser()
 {
-    std::string login;
-    std::string password;
-    bool        isCorrect = false;
-
-    while (!isCorrect) {
-        std::cout << "Enter login: ";
-        std::getline(std::cin >> std::ws, login);
-        if (login.empty()) {
-            std::cout << "Error: login must not be empty."
-                      << "\n";
-            continue;
-        }
-
+    char symbol{};
+    std::cout << "Are you already registered? [Y/N]: ";
+    std::cin >> symbol;
+    if (symbol == 'Y') {
+        std::string username, password;
+        std::cout << "Enter username: ";
+        std::cin >> username;
         std::cout << "Enter password: ";
-        std::getline(std::cin >> std::ws, password);
-        if (password.empty()) {
-            std::cout << "Error: password must not be empty."
-                      << "\n";
-            continue;
-        }
+        std::cin >> password;
 
-        Registration user(login, password);
-        std::string  buffer{};
-        if (user.getPermission()) {
-            boost::asio::write(m_socket, boost::asio::buffer(login + " " + password));
-            boost::asio::read(m_socket, boost::asio::buffer(buffer));
-            if (buffer == "false") {
-                std::cout << "Error: login is already in use." << std::endl;
-            } else {
-                std::cout << "Login and password are correct." << std::endl;
-                isCorrect = true;
-            }
-        }
+        std::string buffer{};
+        boost::asio::write(m_socket, boost::asio::buffer(username + " " + password));
+        boost::asio::read(m_socket, boost::asio::buffer(buffer));
+    } else {
+        std::string username;
+        std::cout << "To get access to the chat, you need to contact the administrator. \nIf you have already been added to the list, enter a nickname: ";
+        std::cin >> username;
+        std::string buffer{};
+        boost::asio::write(m_socket, boost::asio::buffer(username + " " + "-"));
+        boost::asio::read(m_socket, boost::asio::buffer(buffer));
     }
 }
 
@@ -168,8 +105,16 @@ void Client::processInput()
             } else if (command.substr(0, 5) == "online") {
                 boost::asio::streambuf receive_buffer;
                 boost::asio::read(m_socket, receive_buffer, boost::asio::transfer_all());
-            } else {
-                boost::asio::write(m_socket, boost::asio::buffer(command + "\n"));
+            } else if (command.substr(0, 11) == "setpassword") {
+                processMessage(command);
+            } else if (command.substr(0, 3) == "add") {
+                std::string username;
+                size_t      spacePosition = command.find_first_of(" ");
+                if (spacePosition != std::string::npos) {
+                    username                = command.substr(spacePosition + 1);
+                    std::string fullMessage = "add " + username + " ";
+                    boost::asio::write(m_socket, boost::asio::buffer(fullMessage));
+                }
             }
         } catch (std::exception& e) {
             std::cerr << "Exception caught: " << e.what() << std::endl;
@@ -189,9 +134,13 @@ void Client::processMessage(const std::string& command)
         size_t messageStartPosition = recipientId.find_first_of(" ") + 1;
         message                     = recipientId.substr(messageStartPosition);
         recipientId                 = recipientId.substr(0, messageStartPosition - 1);
-
-        std::string fullMessage = "send " + recipientId + " " + message;
-        boost::asio::write(m_socket, boost::asio::buffer(fullMessage));
+        if (command == "send") {
+            std::string fullMessage = "send " + recipientId + " " + message;
+            boost::asio::write(m_socket, boost::asio::buffer(fullMessage));
+        } else {
+            std::string fullMessage = "setpassword " + recipientId + " " + message;
+            boost::asio::write(m_socket, boost::asio::buffer(fullMessage));
+        }
     } else {
         std::cerr << "Invalid send command format." << std::endl;
     }
