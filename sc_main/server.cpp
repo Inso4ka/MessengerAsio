@@ -6,6 +6,7 @@
 #include <thread>
 #include <memory>
 #include <sqlite3.h>
+#include <boost/random.hpp>
 
 using boost::asio::ip::tcp;
 
@@ -21,6 +22,22 @@ class Database
             return;
         }
         create();
+    }
+
+    std::string generateRandomPassword()
+    {
+        const std::string charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        const int         length  = 8;
+
+        boost::random::mt19937                    rng(std::time(nullptr));
+        boost::random::uniform_int_distribution<> index_dist(0, charset.size() - 1);
+
+        std::string password;
+        for (int i = 0; i < length; i++) {
+            password += charset[index_dist(rng)];
+        }
+
+        return password;
     }
 
     void getIntoSystem()
@@ -62,7 +79,8 @@ class Database
     }
     void addUser(const std::string& username)
     {
-        std::string stmt = "INSERT INTO users (username, password) VALUES ('" + username + "', '-')";
+        m_password       = generateRandomPassword();
+        std::string stmt = "INSERT INTO users (username, password) VALUES ('" + username + "', '" + m_password + "')";
         sqlite3_stmt* sql_stmt;
         int           res = sqlite3_prepare_v2(m_db, stmt.c_str(), -1, &sql_stmt, nullptr);
         if (res != SQLITE_OK) {
@@ -227,7 +245,9 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
         Database user(login, password, socketPtr);
         user.getIntoSystem();
         if (password == "-") {
-            boost::asio::write(*socketPtr, boost::asio::buffer("\nDon't forget to change the password using the \"setpassword\" command.\n Your current password is \"-\"."));
+            boost::asio::write(
+                *socketPtr,
+                boost::asio::buffer("\nDon't forget to change the password using the \"setpassword\" command.\n Your current password is \"-\"."));
         }
         m_clients[login] = socketPtr.get();
 
