@@ -5,7 +5,6 @@ CMakeFiles
 cmake_install.cmake
 CMakeCache.txt
 Makefile
-server/start_server.cpp
 build/server
 client/client.dSYM/Contents/Info.plist
 server/server.dSYM/Contents/Info.plist
