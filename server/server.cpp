@@ -18,7 +18,7 @@ void Server::run()
 
 void Server::sendMessage(const std::string& message, const std::string& recipientId)
 {
-    std::cout << "Sending message: \"" << message << "\" to " << recipientId << std::endl;
+    std::cout << "SENDING MESSAGE: \"" << message << "\" to " << recipientId << std::endl;
     auto it = m_clients.find(recipientId); // iterator to a specific identifier
 
     if (it != m_clients.end() && it->second->is_open()) // if the socket exists and is open
@@ -60,9 +60,6 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
 
         Database user(login, password, socketPtr);
         user.getIntoSystem();
-        if (password == "-") {
-            boost::asio::write(*socketPtr, boost::asio::buffer("\nDon't forget to change the password using the \"setpassword\" command.\n "));
-        }
         m_clients[login] = socketPtr.get();
 
         // processing messages
@@ -97,10 +94,6 @@ void Server::handleConnection(std::shared_ptr<tcp::socket> socketPtr)
                 {
                     std::string errorMessage = "Error: client '" + recipientId + "' not found.";
                     boost::asio::write(*socketPtr, boost::asio::buffer(errorMessage));
-                }
-            } else if (command == "online") { // if command online - show map content to client
-                for (const auto& [value, key] : m_clients) {
-                    boost::asio::write(*socketPtr, boost::asio::buffer("\nIP: " + clientId));
                 }
             } else if (command == "setpassword") {
                 std::string oldpassword, newpassword;

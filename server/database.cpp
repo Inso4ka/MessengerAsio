@@ -11,6 +11,26 @@ Database::Database(const std::string& username, const std::string& password, std
     create();
 }
 
+void Database::create()
+{
+    int res = sql_exec(m_db, "CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT)");
+    if (res != SQLITE_OK) {
+        boost::asio::write(*m_socket, boost::asio::buffer("Error creating table.\n"));
+        return;
+    }
+}
+
+int Database::sql_exec(sqlite3* db, const char* sql_stmt)
+{
+    char* errmsg = nullptr;
+    int   res    = sqlite3_exec(db, sql_stmt, nullptr, nullptr, &errmsg);
+    if (res != SQLITE_OK) {
+        std::cerr << "Error executing SQL statement: " + std::string(errmsg) + "\n";
+        sqlite3_free(errmsg);
+    }
+    return res;
+}
+
 std::string Database::generateRandomPassword()
 {
     const std::string charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -41,11 +61,10 @@ void Database::getIntoSystem()
     if (res == SQLITE_ROW) {
         std::string stored_password((const char*)sqlite3_column_text(sql_stmt, 1));
         if (stored_password == m_password) {
-            boost::asio::write(*m_socket, boost::asio::buffer("Welcome back, " + m_username + "!\n"));
+            std::cout << "ONLINE: " << m_username << "\n";
             boost::asio::write(*m_socket, boost::asio::buffer("Login successful."));
         } else {
             boost::asio::write(*m_socket, boost::asio::buffer("Invalid password."));
-            // Разрываем соединение при неправильном пароле
             try {
                 m_socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
                 m_socket->close();
@@ -82,6 +101,7 @@ void Database::addUser(const std::string& username)
         boost::asio::write(*m_socket, boost::asio::buffer("Error adding user to the database."));
     } else {
         boost::asio::write(*m_socket, boost::asio::buffer("User " + username + " has been added to the database."));
+        std::cout << "ADDED: " << username << "\n";
     }
 
     sqlite3_finalize(sql_stmt);
@@ -121,6 +141,7 @@ void Database::changePassword(const std::string& oldPassword, const std::string&
     sqlite3_bind_text(sql_stmt, 2, m_username.c_str(), -1, SQLITE_TRANSIENT);
     res = sqlite3_step(sql_stmt);
     if (res == SQLITE_DONE) {
+        std::cout << "PASSWORD UPDATED: " << m_username << ":" << newPassword << "\n";
         boost::asio::write(*m_socket, boost::asio::buffer("Password changed successfully."));
     } else {
         boost::asio::write(*m_socket, boost::asio::buffer("Error changing password."));

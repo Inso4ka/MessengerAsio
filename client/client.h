@@ -19,6 +19,5 @@ class Client
     void readMessage();                              // method reads a message from the socket
     void processInput();                             // method processes the input from the user
     void processMessage(const std::string& command); // method processes the message received from the server
-    void initializeUser();
+    void initializeUser();                           // method registers user
 };
-

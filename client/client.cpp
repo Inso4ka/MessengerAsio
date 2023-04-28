@@ -70,14 +70,11 @@ void Client::processInput()
 {
     while (true) {
         try {
-            std::string command; // читаем команду от пользователя
+            std::string command; 
             std::getline(std::cin, command);
 
             if (command.substr(0, 4) == "send") {
-                processMessage(command); // передаем команду на обработку
-            } else if (command.substr(0, 5) == "online") {
-                boost::asio::streambuf receive_buffer;
-                boost::asio::read(m_socket, receive_buffer, boost::asio::transfer_all());
+                processMessage(command); 
             } else if (command.substr(0, 11) == "setpassword") {
                 processMessage(command);
             } else if (command.substr(0, 3) == "add") {
@@ -107,7 +104,7 @@ void Client::processMessage(const std::string& command)
         size_t messageStartPosition = recipientId.find_first_of(" ") + 1;
         message                     = recipientId.substr(messageStartPosition);
         recipientId                 = recipientId.substr(0, messageStartPosition - 1);
-        if (command == "send") {
+        if (command.substr(0, 4) == "send") {
             std::string fullMessage = "send " + recipientId + " " + message;
             boost::asio::write(m_socket, boost::asio::buffer(fullMessage));
         } else {
