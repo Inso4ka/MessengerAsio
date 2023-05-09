@@ -1,3 +1,5 @@
+#pragma once
+
 #include <boost/asio.hpp>
 #include <sqlite3.h>
 #include <boost/random.hpp>
